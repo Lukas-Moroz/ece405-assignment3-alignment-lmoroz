@@ -210,7 +210,7 @@ def output_strs():
 
 @pytest.fixture
 def model_id():
-    return "/data/a5-alignment/models/Qwen2.5-Math-1.5B"
+    return "/home/lmoroz/koa_scratch/ece405-assignment3-alignment-lmoroz/models/Qwen2.5-Math-1.5B"
 
 
 @pytest.fixture
@@ -220,7 +220,7 @@ def tokenizer(model_id):
 
 @pytest.fixture
 def model(model_id):
-    return AutoModelForCausalLM.from_pretrained(model_id)
+    return AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float32)
 
 
 @pytest.fixture

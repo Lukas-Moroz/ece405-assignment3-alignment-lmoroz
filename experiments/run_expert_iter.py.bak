@@ -1,0 +1,255 @@
+"""
+Expert Iteration on MATH dataset.
+
+Alternates between: generate rollouts → filter correct → SFT on correct.
+
+Usage:
+  python experiments/run_expert_iter.py \
+      --train-data data/math/train.jsonl \
+      --val-data   data/math/test.jsonl \
+      --group-size 4 --n-ei-steps 3
+
+  # Vary G=8:
+  python experiments/run_expert_iter.py ... --group-size 8
+"""
+import argparse
+import json
+import random
+import time
+from pathlib import Path
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from cs336_alignment.sft import (
+    tokenize_prompt_and_output,
+    get_response_log_probs,
+    sft_microbatch_train_step,
+)
+from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+
+REPO = Path(__file__).resolve().parent.parent
+
+R1_PROMPT = (
+    "A conversation between User and Assistant. The User asks a question, "
+    "and the Assistant solves it. The reasoning process is enclosed within "
+    "<think> </think> and answer is enclosed within <answer> </answer> tags, "
+    "i.e., <think> reasoning process here </think><answer> answer here </answer>.\n\n"
+    "User: {question}\nAssistant: <think>"
+)
+
+
+def load_jsonl(path, limit=None):
+    """Load JSONL file, optionally limiting the number of examples."""
+    data = [json.loads(l) for l in open(path) if l.strip()]
+    return data[:limit] if limit else data
+
+
+def reward_fn(response, gt):
+    """Wrapper around r1_zero_reward_fn for expert iteration."""
+    result = r1_zero_reward_fn(response, gt)
+    return result.get("reward", 0.0)
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Expert Iteration on MATH dataset with vLLM."
+    )
+    p.add_argument("--train-data", required=True, help="Path to training data JSONL")
+    p.add_argument("--val-data", required=True, help="Path to validation data JSONL")
+    p.add_argument(
+        "--model-path",
+        default=str(REPO / "models" / "Qwen2.5-Math-1.5B"),
+        help="Path to base model",
+    )
+    p.add_argument("--n-ei-steps", type=int, default=3, help="Number of EI iterations")
+    p.add_argument("--batch-size", type=int, default=64, help="Batch size for rollouts")
+    p.add_argument(
+        "--group-size", type=int, default=4, help="Number of rollouts per question"
+    )
+    p.add_argument("--sft-steps", type=int, default=20, help="SFT steps per EI iteration")
+    p.add_argument("--sft-lr", type=float, default=2e-5, help="SFT learning rate")
+    p.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
+    p.add_argument(
+        "--temperature", type=float, default=1.0, help="Generation temperature"
+    )
+    p.add_argument("--max-tokens", type=int, default=512, help="Max tokens to generate")
+    p.add_argument("--device", default="cuda", help="Device to use (cuda/cpu)")
+    p.add_argument("--use-wandb", action="store_true", help="Enable W&B logging")
+    p.add_argument("--seed", type=int, default=42, help="Random seed")
+    args = p.parse_args()
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    from vllm import LLM, SamplingParams
+
+    tag = f"ei_G{args.group_size}"
+    run = None
+    if args.use_wandb:
+        import wandb
+
+        run = wandb.init(
+            project="ece405-expert-iter",
+            name=tag,
+            config=vars(args),
+            reinit=True,
+        )
+
+    train_data = load_jsonl(args.train_data)
+    val_data = load_jsonl(args.val_data, 200)
+    print(f"Train: {len(train_data):,}  Val: {len(val_data):,}")
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    print(f"Loading policy from {args.model_path}...")
+    policy = AutoModelForCausalLM.from_pretrained(
+        args.model_path, torch_dtype=torch.float32, trust_remote_code=True
+    ).to(args.device)
+    policy.train()
+
+    # vLLM on same GPU — split memory 45/45
+    print("Starting vLLM...")
+    llm = LLM(
+        model=args.model_path,
+        dtype="float32",
+        gpu_memory_utilization=0.45,
+        trust_remote_code=True,
+    )
+
+    rollout_params = SamplingParams(
+        temperature=args.temperature,
+        top_p=1.0,
+        max_tokens=args.max_tokens,
+        min_tokens=4,
+        n=args.group_size,
+        stop=["</answer>"],
+        include_stop_str_in_output=True,
+        seed=args.seed,
+    )
+    eval_params = SamplingParams(
+        temperature=args.temperature,
+        top_p=1.0,
+        max_tokens=args.max_tokens,
+        min_tokens=4,
+        n=1,
+        stop=["</answer>"],
+        include_stop_str_in_output=True,
+    )
+
+    def sync_to_vllm():
+        """Sync policy weights to vLLM model."""
+        sd = policy.state_dict()
+        m = llm.llm_engine.model_executor.driver_worker.model_runner.model
+        m.load_weights(sd.items())
+
+    def evaluate():
+        """Evaluate current policy on validation set."""
+        sync_to_vllm()
+        prompts = [R1_PROMPT.format(question=ex["problem"]) for ex in val_data]
+        gts = [ex["answer"] for ex in val_data]
+        outputs = llm.generate(prompts, eval_params)
+        correct = sum(
+            reward_fn(o.outputs[0].text, gt) > 0.5 for o, gt in zip(outputs, gts)
+        )
+        return correct / len(val_data)
+
+    history = []
+    total_start = time.time()
+
+    for ei_step in range(1, args.n_ei_steps + 1):
+        print(f"\n=== EI step {ei_step}/{args.n_ei_steps} ===")
+        batch = random.sample(train_data, min(args.batch_size, len(train_data)))
+        prompts = [R1_PROMPT.format(question=ex["problem"]) for ex in batch]
+        gts = [ex["answer"] for ex in batch]
+
+        sync_to_vllm()
+        rollouts = llm.generate(prompts, rollout_params)
+
+        correct_p, correct_r = [], []
+        n_total = n_correct = 0
+        for pr, gt, out in zip(prompts, gts, rollouts):
+            for comp in out.outputs:
+                n_total += 1
+                if reward_fn(comp.text, gt) > 0.5:
+                    correct_p.append(pr)
+                    correct_r.append(comp.text)
+                    n_correct += 1
+
+        frac = n_correct / max(n_total, 1)
+        print(f"  Correct: {n_correct}/{n_total}  ({frac:.1%})")
+
+        if n_correct == 0:
+            print("  No correct rollouts — skip SFT")
+            history.append({"ei_step": ei_step, "frac_correct": frac})
+            continue
+
+        # SFT on correct responses
+        policy.train()
+        optimizer = torch.optim.AdamW(policy.parameters(), lr=args.sft_lr, weight_decay=0.01)
+        optimizer.zero_grad()
+        losses = []
+
+        for sft_step in range(1, args.sft_steps + 1):
+            i = random.randrange(len(correct_p))
+            tok = tokenize_prompt_and_output(
+                [correct_p[i]], [correct_r[i]], tokenizer
+            )
+            iids = tok["input_ids"].to(args.device)
+            labs = tok["labels"].to(args.device)
+            mask = tok["response_mask"].to(args.device)
+            lp = get_response_log_probs(policy, iids, labs)["log_probs"]
+            loss, meta = sft_microbatch_train_step(lp, mask, args.grad_accum)
+            losses.append(loss.item())
+            if sft_step % args.grad_accum == 0:
+                torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+
+        avg_loss = sum(losses) / max(len(losses), 1)
+        val_acc = evaluate()
+        print(f"  SFT loss: {avg_loss:.4f}   Val accuracy: {val_acc:.4f}")
+
+        entry = {
+            "ei_step": ei_step,
+            "frac_correct": frac,
+            "sft_loss": avg_loss,
+            "val_accuracy": val_acc,
+        }
+        history.append(entry)
+
+        if run:
+            run.log({**entry})
+
+    elapsed = time.time() - total_start
+    print(f"\nTotal: {elapsed:.0f}s ({elapsed/60:.1f} min)")
+
+    # Save checkpoint
+    ckpt = REPO / "checkpoints" / "expert_iter" / tag
+    ckpt.mkdir(parents=True, exist_ok=True)
+    policy.save_pretrained(str(ckpt))
+    tokenizer.save_pretrained(str(ckpt))
+    print(f"Checkpoint saved to {ckpt}")
+
+    # Save results
+    out_dir = REPO / "results" / "expert_iter"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / f"{tag}.json", "w") as f:
+        json.dump(
+            {
+                "config": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
+                "history": history,
+                "elapsed_seconds": elapsed,
+            },
+            f,
+            indent=2,
+        )
+    print(f"Results saved to {out_dir}/{tag}.json")
+    if run:
+        run.finish()
+
+
+if __name__ == "__main__":
+    main()

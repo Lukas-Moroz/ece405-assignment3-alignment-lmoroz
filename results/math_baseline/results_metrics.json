@@ -1,0 +1,9 @@
+{
+  "n_examples": 2500,
+  "both_correct (format=1, answer=1)": 70,
+  "format_only (format=1, answer=0)": 375,
+  "both_zero (format=0, answer=0)": 2055,
+  "avg_format_reward": 0.178,
+  "avg_answer_reward": 0.028,
+  "accuracy": 0.028
+}

@@ -33,9 +33,7 @@ from vllm import LLM, SamplingParams
 
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
-# ---------------------------------------------------------------------------
 # Paths
-# ---------------------------------------------------------------------------
 PROMPTS_DIR = Path(__file__).parent.parent / "cs336_alignment" / "prompts"
 
 
@@ -225,7 +223,7 @@ def main():
 
     # 3. Initialize vLLM model
     print(f"\nLoading model from {args.model_path}...")
-    llm = LLM(model=args.model_path, dtype="float32")
+    llm = LLM(model=args.model_path, dtype="bfloat16")
 
     # Sampling params as specified in the assignment handout
     sampling_params = SamplingParams(

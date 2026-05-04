@@ -2,6 +2,24 @@
 models/
 data/
 
+# Model weight files (too large for GitHub - 100MB/file limit)
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.msgpack
+
+# Training checkpoints dir (intermediate weights only, all bulk)
+checkpoints/
+
+# HuggingFace model artifacts that ship with weights
+**/final_policy/tokenizer.json
+**/final_policy/*.model
+
+slurm-*.out
+*.sbatch.log
+
 nav
 tags
 

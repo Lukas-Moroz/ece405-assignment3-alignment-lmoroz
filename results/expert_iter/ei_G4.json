@@ -1,0 +1,51 @@
+{
+  "config": {
+    "train_data": "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/data/math/train.jsonl",
+    "val_data": "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/data/math/test.jsonl",
+    "model_path": "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/models/Qwen2.5-Math-1.5B",
+    "n_ei_steps": 5,
+    "batch_size": 512,
+    "group_size": 4,
+    "sft_steps": 40,
+    "sft_lr": 5e-06,
+    "grad_accum": 4,
+    "temperature": 1.0,
+    "max_tokens": 512,
+    "device": "cuda",
+    "use_wandb": false,
+    "seed": 42
+  },
+  "history": [
+    {
+      "ei_step": 1,
+      "frac_correct": 0.00244140625,
+      "sft_loss": 0.14265915260693873,
+      "val_accuracy": 0.19
+    },
+    {
+      "ei_step": 2,
+      "frac_correct": 0.2001953125,
+      "sft_loss": 0.2415296074934304,
+      "val_accuracy": 0.25
+    },
+    {
+      "ei_step": 3,
+      "frac_correct": 0.2568359375,
+      "sft_loss": 0.2383306928910315,
+      "val_accuracy": 0.295
+    },
+    {
+      "ei_step": 4,
+      "frac_correct": 0.2763671875,
+      "sft_loss": 0.25689486544579265,
+      "val_accuracy": 0.305
+    },
+    {
+      "ei_step": 5,
+      "frac_correct": 0.2822265625,
+      "sft_loss": 0.2442326536460314,
+      "val_accuracy": 0.3
+    }
+  ],
+  "elapsed_seconds": 724.7338361740112
+}

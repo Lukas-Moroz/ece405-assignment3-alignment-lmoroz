@@ -1,0 +1,51 @@
+INFO 04-22 20:53:41 __init__.py:190] Automatically detected platform cuda.
+`torch_dtype` is deprecated! Use `dtype` instead!
+Train: 10,000  Val: 200
+Loading policy from /mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/models/Qwen2.5-Math-1.5B...
+Loading weights:   0%|                                                                                        | 0/338 [00:00<?, ?it/s]Loading weights:   0%|▏                                                                               | 1/338 [00:04<22:43,  4.04s/it]Loading weights:  40%|███████████████████████████████▏                                              | 135/338 [00:05<00:05, 35.16it/s]Loading weights:  44%|██████████████████████████████████▍                                           | 149/338 [00:05<00:04, 37.90it/s]Loading weights:  51%|███████████████████████████████████████▍                                      | 171/338 [00:05<00:03, 44.48it/s]Loading weights:  54%|██████████████████████████████████████████▍                                   | 184/338 [00:05<00:03, 47.77it/s]Loading weights:  58%|█████████████████████████████████████████████▍                                | 197/338 [00:05<00:02, 51.47it/s]Loading weights:  65%|██████████████████████████████████████████████████▌                           | 219/338 [00:05<00:01, 59.87it/s]Loading weights:  68%|█████████████████████████████████████████████████████▎                        | 231/338 [00:06<00:01, 66.33it/s]Loading weights:  72%|████████████████████████████████████████████████████████                      | 243/338 [00:06<00:01, 68.31it/s]Loading weights:  75%|██████████████████████████████████████████████████████████▊                   | 255/338 [00:06<00:01, 68.95it/s]Loading weights:  79%|█████████████████████████████████████████████████████████████▌                | 267/338 [00:06<00:00, 72.65it/s]Loading weights:  83%|████████████████████████████████████████████████████████████████▍             | 279/338 [00:06<00:00, 77.82it/s]Loading weights:  86%|███████████████████████████████████████████████████████████████████▏          | 291/338 [00:06<00:00, 78.65it/s]Loading weights:  90%|█████████████████████████████████████████████████████████████████████▉        | 303/338 [00:06<00:00, 77.61it/s]Loading weights:  93%|████████████████████████████████████████████████████████████████████████▋     | 315/338 [00:07<00:00, 78.98it/s]Loading weights:  97%|███████████████████████████████████████████████████████████████████████████▍  | 327/338 [00:07<00:00, 85.40it/s]Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████| 338/338 [00:07<00:00, 46.29it/s]
+Starting vLLM...
+INFO 04-22 20:53:56 config.py:2378] Upcasting torch.bfloat16 to torch.float32.
+INFO 04-22 20:54:53 config.py:542] This model supports multiple tasks: {'generate', 'score', 'reward', 'classify', 'embed'}. Defaulting to 'generate'.
+INFO 04-22 20:54:53 llm_engine.py:234] Initializing a V0 LLM engine (v0.7.2) with config: model='/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/models/Qwen2.5-Math-1.5B', speculative_config=None, tokenizer='/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/models/Qwen2.5-Math-1.5B', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, override_neuron_config=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.float32, max_seq_len=4096, download_dir=None, load_format=LoadFormat.AUTO, tensor_parallel_size=1, pipeline_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, kv_cache_dtype=auto,  device_config=cuda, decoding_config=DecodingConfig(guided_decoding_backend='xgrammar'), observability_config=ObservabilityConfig(otlp_traces_endpoint=None, collect_model_forward_time=False, collect_model_execute_time=False), seed=0, served_model_name=/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/models/Qwen2.5-Math-1.5B, num_scheduler_steps=1, multi_step_stream_outputs=True, enable_prefix_caching=False, chunked_prefill_enabled=False, use_async_output_proc=True, disable_mm_preprocessor_cache=False, mm_processor_kwargs=None, pooler_config=None, compilation_config={"splitting_ops":[],"compile_sizes":[],"cudagraph_capture_sizes":[256,248,240,232,224,216,208,200,192,184,176,168,160,152,144,136,128,120,112,104,96,88,80,72,64,56,48,40,32,24,16,8,4,2,1],"max_capture_size":256}, use_cached_outputs=False, 
+Traceback (most recent call last):
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/experiments/run_expert_iter.py", line 262, in <module>
+    main()
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/experiments/run_expert_iter.py", line 115, in main
+    llm = LLM(
+          ^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/utils.py", line 1051, in inner
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/entrypoints/llm.py", line 242, in __init__
+    self.llm_engine = self.engine_class.from_engine_args(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/engine/llm_engine.py", line 484, in from_engine_args
+    engine = cls(
+             ^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/engine/llm_engine.py", line 246, in __init__
+    self.tokenizer = self._init_tokenizer()
+                     ^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/engine/llm_engine.py", line 528, in _init_tokenizer
+    return init_tokenizer_from_configs(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/transformers_utils/tokenizer_group/__init__.py", line 32, in init_tokenizer_from_configs
+    return get_tokenizer_group(parallel_config.tokenizer_pool_config,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/transformers_utils/tokenizer_group/__init__.py", line 53, in get_tokenizer_group
+    return tokenizer_cls.from_config(tokenizer_pool_config, **init_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/transformers_utils/tokenizer_group/tokenizer_group.py", line 33, in from_config
+    return cls(**init_kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/transformers_utils/tokenizer_group/tokenizer_group.py", line 25, in __init__
+    self.tokenizer = get_tokenizer(self.tokenizer_id, **tokenizer_config)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/transformers_utils/tokenizer.py", line 224, in get_tokenizer
+    tokenizer = get_cached_tokenizer(tokenizer)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/vllm/transformers_utils/tokenizer.py", line 70, in get_cached_tokenizer
+    tokenizer.all_special_tokens_extended)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/lustre/koa/scratch/lmoroz/ece405-assignment3-alignment-lmoroz/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py", line 1301, in __getattr__
+    raise AttributeError(f"{self.__class__.__name__} has no attribute {key}")
+AttributeError: Qwen2Tokenizer has no attribute all_special_tokens_extended. Did you mean: 'num_special_tokens_to_add'?

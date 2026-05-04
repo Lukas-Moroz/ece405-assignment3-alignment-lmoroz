@@ -1,0 +1,233 @@
+"""
+SFT on MATH reasoning traces, dataset size sweep + filtered variant.
+
+Usage:
+  # Full sweep (128, 256, 512, 1024, full):
+  python experiments/run_sft_math.py --mode sweep \
+      --sft-data data/math/sft.jsonl --val-data data/math/test.jsonl
+
+  # Filtered only (correct answers only):
+  python experiments/run_sft_math.py --mode filtered \
+      --sft-data data/math/sft.jsonl --val-data data/math/test.jsonl
+
+  # Single size:
+  python experiments/run_sft_math.py --mode single --dataset-size 128 ...
+"""
+import argparse
+import json
+import random
+import time
+from pathlib import Path
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
+
+from cs336_alignment.sft import (
+    tokenize_prompt_and_output,
+    get_response_log_probs,
+    sft_microbatch_train_step,
+)
+from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+
+REPO = Path(__file__).resolve().parent.parent
+DATASET_SIZES = [128, 256, 512, 1024, None]   # None = full
+
+
+def load_jsonl(path, limit=None):
+    """Load JSONL file, optionally limiting the number of examples."""
+    data = [json.loads(l) for l in open(path) if l.strip()]
+    return data[:limit] if limit else data
+
+
+def simple_reward(response, gt):
+    """Simple reward function to evaluate answer correctness."""
+    import re
+    m = re.search(r"<answer>(.*?)</answer>", response, re.DOTALL)
+    if not m:
+        return 0.0
+    pred = m.group(1).strip()
+    def norm(s):
+        s = s.replace(",","").strip()
+        try:
+            v=float(s); return str(int(v)) if v==int(v) else str(round(v,6))
+        except: return s
+    return float(pred == gt or norm(pred) == norm(gt))
+
+
+def train_one(
+    sft_data,
+    model_path,
+    dataset_size,
+    n_steps,
+    lr,
+    grad_accum,
+    tag,
+    use_wandb,
+    device,
+):
+    """Train SFT model for a specific dataset size."""
+    data = sft_data[:dataset_size] if dataset_size else sft_data
+    print(f"\n[{tag}] dataset={len(data)}  steps={n_steps}  lr={lr}")
+
+    run = None
+    if use_wandb:
+        import wandb
+        run = wandb.init(
+            project="ece405-sft-math",
+            name=tag,
+            config={"size": dataset_size, "steps": n_steps, "lr": lr},
+            reinit=True,
+        )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path, torch_dtype=torch.float32, trust_remote_code=True
+    ).to(device)
+    model.train()
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=max(1, int(n_steps * 0.03)),
+        num_training_steps=n_steps,
+    )
+    optimizer.zero_grad()
+    losses = []
+    t0 = time.time()
+
+    for step in range(1, n_steps + 1):
+        ex = random.choice(data)
+        prompt = ex.get("prompt", ex.get("problem", ""))
+        response = ex.get("response", ex.get("solution", ""))
+
+        tok = tokenize_prompt_and_output([prompt], [response], tokenizer)
+        iids = tok["input_ids"].to(device)
+        labs = tok["labels"].to(device)
+        mask = tok["response_mask"].to(device)
+
+        lp = get_response_log_probs(model, iids, labs)["log_probs"]
+        loss, meta = sft_microbatch_train_step(lp, mask, grad_accum)
+        losses.append(loss.item())
+
+        if step % grad_accum == 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+
+        if step % 20 == 0:
+            avg = sum(losses[-20:]) / 20
+            print(
+                f"  [{tag}] step={step}/{n_steps}  loss={avg:.4f}  "
+                f"lr={scheduler.get_last_lr()[0]:.2e}  {time.time()-t0:.0f}s"
+            )
+            if run:
+                run.log(
+                    {
+                        "train/loss": avg,
+                        "step": step,
+                        "train/lr": scheduler.get_last_lr()[0],
+                    }
+                )
+
+    # Save checkpoint
+    ckpt = REPO / "checkpoints" / "sft_math" / tag
+    ckpt.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(str(ckpt))
+    tokenizer.save_pretrained(str(ckpt))
+
+    final_loss = sum(losses[-min(20, len(losses)):]) / min(20, len(losses))
+    print(f"  [{tag}] final_loss={final_loss:.4f}  checkpoint={ckpt}")
+
+    result = {
+        "tag": tag,
+        "dataset_size": dataset_size or "full",
+        "n_steps": n_steps,
+        "final_loss": final_loss,
+        "losses": losses,
+    }
+    out_dir = REPO / "results" / "sft_math"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(out_dir / f"{tag}.json", "w") as f:
+        json.dump(result, f, indent=2)
+
+    if run:
+        run.finish()
+    return final_loss
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--mode", choices=["sweep", "filtered", "single"], default="sweep")
+    p.add_argument("--sft-data", required=True)
+    p.add_argument("--val-data", required=True)
+    p.add_argument("--model-path", default=str(REPO / "models" / "Qwen2.5-Math-1.5B"))
+    p.add_argument("--dataset-size", type=int, default=128)
+    p.add_argument("--n-steps", type=int, default=120)
+    p.add_argument("--lr", type=float, default=2e-5)
+    p.add_argument("--grad-accum", type=int, default=8)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--use-wandb", action="store_true")
+    p.add_argument("--seed", type=int, default=42)
+    args = p.parse_args()
+
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    sft_data = load_jsonl(args.sft_data)
+    print(f"SFT data: {len(sft_data)} examples from {args.sft_data}")
+
+    kw = dict(
+        model_path=args.model_path,
+        n_steps=args.n_steps,
+        lr=args.lr,
+        grad_accum=args.grad_accum,
+        use_wandb=args.use_wandb,
+        device=args.device,
+    )
+
+    if args.mode == "sweep":
+        for size in DATASET_SIZES:
+            train_one(
+                sft_data,
+                dataset_size=size,
+                tag=f"sft_size_{size or 'full'}",
+                **kw,
+            )
+
+    elif args.mode == "filtered":
+        # Keep only examples where the response contains correct answer
+        filtered = []
+        for ex in sft_data:
+            gt = ex.get("answer", "")
+            resp = ex.get("response", "")
+            if gt and simple_reward(resp, gt) > 0.5:
+                filtered.append(ex)
+        print(f"Filtered: {len(sft_data)} → {len(filtered)} correct examples")
+        # Write filtered data
+        fp = Path(args.sft_data).parent / "sft_filtered.jsonl"
+        with open(fp, "w") as f:
+            for ex in filtered:
+                f.write(json.dumps(ex) + "\n")
+        print(f"Filtered dataset: {len(filtered)} → {fp}")
+        train_one(
+            filtered,
+            dataset_size=None,
+            tag="sft_filtered",
+            **kw,
+        )
+
+    elif args.mode == "single":
+        train_one(
+            sft_data,
+            dataset_size=args.dataset_size,
+            tag=f"sft_size_{args.dataset_size}",
+            **kw,
+        )
+
+
+if __name__ == "__main__":
+    main()
